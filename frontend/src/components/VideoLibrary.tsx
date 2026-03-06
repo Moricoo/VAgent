@@ -39,6 +39,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [sortType, setSortType] = useState<SortType>('date-desc');
+  const [batchSelectMode, setBatchSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [analyzing, setAnalyzing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -90,7 +91,6 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
     }
     switch (sortType) {
       case 'date-desc': result.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()); break;
-      case 'date-asc':  result.sort((a, b) => new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime()); break;
       case 'category':  result.sort((a, b) => a.category.localeCompare(b.category)); break;
       case 'name':      result.sort((a, b) => a.name.localeCompare(b.name)); break;
     }
@@ -100,6 +100,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
   const pendingVideos = videos.filter(v => v.status === 'pending');
   const analyzingVideos = videos.filter(v => v.status === 'analyzing');
   const hasAnalyzing = analyzingVideos.length > 0;
+  const analyzableVideos = videos.filter(v => v.status === 'pending' || (v.status === 'analyzed' && !v.analysis));
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -123,20 +124,16 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
     }
   };
 
-  const handleAnalyze = async (ids?: string[]) => {
-    const targetIds = ids || (selectedIds.size > 0
-      ? Array.from(selectedIds)
-      : pendingVideos.map(v => v.id)
-    );
-    if (targetIds.length === 0 || hasAnalyzing || analyzing) return;
+  const handleAnalyze = async (ids: string[]) => {
+    if (ids.length === 0 || hasAnalyzing || analyzing) return;
     setAnalyzing(true);
+    setBatchSelectMode(false);
+    setSelectedIds(new Set());
     try {
-      await videosApi.analyze(targetIds);
+      await videosApi.analyze(ids);
       const res = await videosApi.list();
       onVideosChange(res.data);
-      setSelectedIds(new Set());
-      // Subscribe to SSE progress for each video being analyzed
-      for (const id of targetIds) {
+      for (const id of ids) {
         subscribeAnalysis(id);
       }
     } catch (err) {
@@ -144,6 +141,16 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  const handleConfirmBatchAnalyze = () => {
+    if (selectedIds.size === 0) return;
+    handleAnalyze(Array.from(selectedIds));
+  };
+
+  const exitBatchMode = () => {
+    setBatchSelectMode(false);
+    setSelectedIds(new Set());
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -197,7 +204,6 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
 
   const sortLabels: Record<SortType, string> = {
     'date-desc': '最新优先',
-    'date-asc': '最早优先',
     'category': '按分类',
     'name': '按名称',
   };
@@ -206,7 +212,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex-shrink-0 p-3 space-y-2.5 border-b border-gray-100">
-        {/* Upload + Analyze All */}
+        {/* Upload + 批量分析（仅非多选模式显示） */}
         <div className="flex gap-2">
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -216,17 +222,17 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
             {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             {uploading ? '上传中...' : '上传视频'}
           </button>
-          <button
-            onClick={() => handleAnalyze()}
-            disabled={hasAnalyzing || analyzing || pendingVideos.length === 0}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-xs font-semibold text-gray-600 transition-all"
-            title={hasAnalyzing ? '分析进行中，请稍候' : `分析全部 ${pendingVideos.length} 个待分析视频`}
-          >
-            {(hasAnalyzing || analyzing)
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-500" />
-              : <Zap className="w-3.5 h-3.5 text-amber-500" />}
-            {hasAnalyzing ? `分析中 (${analyzingVideos.length})` : `全部分析 (${pendingVideos.length})`}
-          </button>
+          {!batchSelectMode && (
+            <button
+              onClick={() => { setBatchSelectMode(true); setSelectedIds(new Set()); }}
+              disabled={hasAnalyzing || analyzing || analyzableVideos.length === 0}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-xs font-semibold text-gray-600 transition-all"
+              title={hasAnalyzing ? '分析进行中，请稍候' : '选择要分析的视频后点击确认'}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              批量分析
+            </button>
+          )}
         </div>
 
         {/* Search */}
@@ -286,20 +292,22 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
 
       </div>
 
-      {/* Multi-select action bar */}
-      {selectedIds.size > 0 && (
+      {/* 批量分析：多选模式下的操作栏 */}
+      {batchSelectMode && (
         <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 bg-violet-50 border-b border-violet-100">
-          <span className="text-xs text-violet-700 font-semibold">已选 {selectedIds.size} 个</span>
+          <span className="text-xs text-violet-700 font-semibold">
+            {selectedIds.size > 0 ? `已选 ${selectedIds.size} 个` : '请勾选要分析的视频'}
+          </span>
           <div className="flex gap-1.5">
             <button
-              onClick={() => handleAnalyze(Array.from(selectedIds))}
-              disabled={hasAnalyzing || analyzing}
-              className="px-2.5 py-1 rounded-md bg-violet-600 text-white text-[11px] font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              onClick={handleConfirmBatchAnalyze}
+              disabled={selectedIds.size === 0 || hasAnalyzing || analyzing}
+              className="px-2.5 py-1 rounded-md bg-violet-600 text-white text-[11px] font-semibold hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              分析所选
+              确认
             </button>
             <button
-              onClick={() => setSelectedIds(new Set())}
+              onClick={exitBatchMode}
               className="px-2.5 py-1 rounded-md bg-white border border-gray-200 text-gray-500 text-[11px] hover:text-gray-700 transition-colors"
             >
               取消
@@ -324,7 +332,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
           </div>
         ) : (
           <div className="p-2 space-y-0.5">
-            {filteredVideos.length > 1 && (
+            {batchSelectMode && filteredVideos.length > 1 && (
               <button
                 onClick={toggleSelectAll}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 text-gray-400 hover:text-gray-600 transition-colors"
@@ -341,6 +349,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
                 key={video.id}
                 video={video}
                 isSelected={selectedVideo?.id === video.id}
+                showCheckbox={batchSelectMode}
                 isChecked={selectedIds.has(video.id)}
                 onSelect={() => onSelectVideo(video)}
                 onCheck={(e) => toggleSelect(video.id, e)}
@@ -349,7 +358,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
                 onRename={(name) => handleRename(video.id, name)}
                 formatDuration={formatDuration}
                 formatDate={formatDate}
-                canAnalyze={!hasAnalyzing && !analyzing && video.status === 'pending'}
+                canAnalyze={!hasAnalyzing && !analyzing && (video.status === 'pending' || (video.status === 'analyzed' && !video.analysis))}
                 categoryColor={CATEGORY_COLORS[video.category] || CATEGORY_COLORS['其他']}
                 progress={progressMap[video.id]}
               />
@@ -379,11 +388,12 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
 }
 
 function VideoItem({
-  video, isSelected, isChecked, onSelect, onCheck, onDelete, onAnalyze, onRename,
+  video, isSelected, showCheckbox, isChecked, onSelect, onCheck, onDelete, onAnalyze, onRename,
   formatDuration, formatDate, canAnalyze, categoryColor, progress,
 }: {
   video: Video;
   isSelected: boolean;
+  showCheckbox: boolean;
   isChecked: boolean;
   onSelect: () => void;
   onCheck: (e: React.MouseEvent) => void;
@@ -435,15 +445,17 @@ function VideoItem({
         'hover:bg-gray-50 border border-transparent cursor-pointer'
       }`}
     >
-      {/* Checkbox */}
-      <button
-        onClick={onCheck}
-        className={`flex-shrink-0 transition-opacity ${hovered || isChecked ? 'opacity-100' : 'opacity-0'}`}
-      >
-        {isChecked
-          ? <CheckSquare className="w-3.5 h-3.5 text-violet-500" />
-          : <Square className="w-3.5 h-3.5 text-gray-400" />}
-      </button>
+      {/* 仅批量分析模式下显示多选框 */}
+      {showCheckbox && (
+        <button
+          onClick={onCheck}
+          className="flex-shrink-0 transition-opacity"
+        >
+          {isChecked
+            ? <CheckSquare className="w-3.5 h-3.5 text-violet-500" />
+            : <Square className="w-3.5 h-3.5 text-gray-400" />}
+        </button>
+      )}
 
       {/* Thumbnail */}
       <div
@@ -500,7 +512,7 @@ function VideoItem({
         )}
 
         <div className="flex items-center gap-1.5 mt-0.5">
-          <StatusBadge status={video.status} progress={progress} />
+          <StatusBadge status={video.status} hasAnalysis={!!video.analysis} progress={progress} />
           <span className="text-[10px] text-gray-400 flex items-center gap-0.5 font-medium">
             <Clock className="w-2.5 h-2.5" />
             {formatDate(video.uploadedAt)}
@@ -554,7 +566,15 @@ function VideoItem({
   );
 }
 
-function StatusBadge({ status, progress }: { status: Video['status']; progress?: { stage: string; detail: string } }) {
+function StatusBadge({ status, hasAnalysis, progress }: { status: Video['status']; hasAnalysis?: boolean; progress?: { stage: string; detail: string } }) {
+  if (status === 'analyzed' && !hasAnalysis) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-600 text-[10px] font-semibold border border-amber-200">
+        <span className="w-1 h-1 rounded-full bg-amber-500" />
+        待重新分析
+      </span>
+    );
+  }
   if (status === 'analyzed') {
     return (
       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 text-[10px] font-semibold border border-emerald-100">

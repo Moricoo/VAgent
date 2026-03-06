@@ -23,6 +23,10 @@ logs/
 backend/uploads/
 backend/data/
 
+# PID files
+*.pid
+.*.pid
+
 # OS
 .DS_Store
 Thumbs.db

@@ -58,6 +58,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  isStreaming?: boolean;
+  /** 进度类消息（如 YouTube 导入）使用独立 logo，与 AI 对话区分 */
+  messageType?: 'chat' | 'progress';
 }
 
-export type SortType = 'date-desc' | 'date-asc' | 'category' | 'name';
+export type SortType = 'date-desc' | 'category' | 'name';

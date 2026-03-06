@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Sparkles, Bot, User, Loader2, LayoutGrid, Copy, Check, Youtube, Download, AlertCircle } from 'lucide-react';
+import { Send, Sparkles, Bot, User, Loader2, LayoutGrid, Copy, Check, Youtube, Download, MoreHorizontal, Trash2, MessageSquare, Cpu, X, ChevronRight } from 'lucide-react';
 import { Video, ChatMessage } from '../types';
 import { aiApi, ChatHistoryMessage, youtubeApi } from '../api/client';
 import MultiVideoModal from './MultiVideoModal';
@@ -28,12 +28,16 @@ interface Props {
 }
 
 const QUICK_PROMPTS = [
+  { label: '📜 提取脚本', prompt: '请根据这个视频的内容帮我提取或整理成文字脚本（旁白/解说稿）' },
   { label: '✏️ 写标题', prompt: '帮我为这个视频写一个吸引眼球的标题' },
   { label: '📄 写文案', prompt: '帮我生成这个视频的发布文案' },
   { label: '✂️ 剪辑思路', prompt: '请给我提供这个视频的剪辑思路和建议' },
   { label: '🏷️ 推荐标签', prompt: '帮我推荐这个视频的话题标签' },
   { label: '⚡ 精彩片段', prompt: '这个视频哪个片段最精彩？' },
 ];
+
+const CHAT_STORAGE_KEY = 'vagent_chat_messages';
+const SETTINGS_STORAGE_KEY = 'vagent_chat_settings';
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
@@ -47,6 +51,51 @@ const WELCOME_MESSAGE: ChatMessage = {
 • 💬 随时聊天，什么都可以问我！`,
   timestamp: new Date(),
 };
+
+interface ChatSettings {
+  replyStyle: 'professional' | 'casual';
+  autoContext: boolean;
+}
+
+const DEFAULT_SETTINGS: ChatSettings = {
+  replyStyle: 'professional',
+  autoContext: true,
+};
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!raw) return [WELCOME_MESSAGE];
+    const parsed = JSON.parse(raw) as Array<Omit<ChatMessage, 'timestamp'> & { timestamp: string }>;
+    return parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp), isStreaming: false }));
+  } catch {
+    return [WELCOME_MESSAGE];
+  }
+}
+
+function saveMessages(messages: ChatMessage[]) {
+  try {
+    // 不保存进行中的进度消息
+    const toSave = messages.map(m => ({ ...m, isStreaming: false }));
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave));
+  } catch { /* ignore quota errors */ }
+}
+
+function loadSettings(): ChatSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function saveSettings(settings: ChatSettings) {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch { /* ignore */ }
+}
 
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split('\n');
@@ -79,105 +128,118 @@ function renderMarkdown(text: string): React.ReactNode {
   });
 }
 
-interface YouTubeImportState {
-  videoId: string;
-  url: string;
-  title: string;
-  stage: string;
-  detail: string;
-  done: boolean;
-  error: boolean;
-}
-
 export default function AIAssistant({ selectedVideo, videos, onVideoImported }: Props & { onVideoImported?: () => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [ytImports, setYtImports] = useState<Map<string, YouTubeImportState>>(new Map());
   const [pendingYtUrl, setPendingYtUrl] = useState<string | null>(null);
+  const [settings, setSettings] = useState<ChatSettings>(loadSettings);
+  const [clearConfirm, setClearConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── YouTube 导入 ──────────────────────────────────────────────────────
+  // 持久化聊天记录
+  useEffect(() => {
+    saveMessages(messages);
+  }, [messages]);
+
+  // 点击外部关闭设置面板
+  useEffect(() => {
+    if (!showSettings) return;
+    const handler = (e: MouseEvent) => {
+      if (settingsPanelRef.current && !settingsPanelRef.current.contains(e.target as Node)) {
+        setShowSettings(false);
+        setClearConfirm(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSettings]);
+
+  const updateSettings = (patch: Partial<ChatSettings>) => {
+    setSettings(prev => {
+      const next = { ...prev, ...patch };
+      saveSettings(next);
+      return next;
+    });
+  };
+
+  const handleClearChat = () => {
+    if (!clearConfirm) { setClearConfirm(true); return; }
+    setMessages([WELCOME_MESSAGE]);
+    localStorage.removeItem(CHAT_STORAGE_KEY);
+    setShowSettings(false);
+    setClearConfirm(false);
+  };
+
+  // ── YouTube 导入（进度作为 bot 消息内联在对话流中）────────────────────
   const startYouTubeImport = useCallback(async (url: string, title = '') => {
-    const importId = uuidv4();
-    const newState: YouTubeImportState = {
-      videoId: importId, url, title: title || url,
-      stage: 'fetching', detail: '准备中...', done: false, error: false,
+    const progressMsgId = uuidv4();
+    let videoTitle = title || url;
+
+    const makeContent = (stage: string, detail: string, isDone: boolean, isError: boolean) => {
+      if (isError) return `❌ **YouTube 视频导入失败**\n\n${detail}`;
+      if (isDone) return `✅ **「${videoTitle}」导入完成！**\n\n视频已添加到左侧视频库，点击后可查看 AI 分析结果和创作建议。`;
+      const label = YT_STAGE_LABELS[stage] ?? stage;
+      return `${label}${detail ? ` — ${detail}` : ''}`;
     };
 
-    setYtImports(prev => new Map(prev).set(importId, newState));
+    // 立即在对话流中插入进度消息（messageType: 'progress' 使用独立 logo）
+    setMessages(prev => [...prev, {
+      id: progressMsgId, role: 'assistant',
+      content: makeContent('fetching', '准备中...', false, false),
+      timestamp: new Date(),
+      isStreaming: true,
+      messageType: 'progress',
+    }]);
 
     try {
-      // 先预获取标题
+      // 预获取标题
       try {
         const infoRes = await youtubeApi.getInfo(url);
-        const infoTitle = infoRes.data.info?.title || url;
-        setYtImports(prev => {
-          const next = new Map(prev);
-          const s = next.get(importId);
-          if (s) next.set(importId, { ...s, title: infoTitle });
-          return next;
-        });
-      } catch { /* ignore, title will be URL */ }
+        videoTitle = infoRes.data.info?.title || videoTitle;
+        setMessages(prev => prev.map(m =>
+          m.id === progressMsgId
+            ? { ...m, content: makeContent('fetching', '正在获取视频信息...', false, false), messageType: 'progress' as const }
+            : m
+        ));
+      } catch { /* ignore */ }
 
       // 触发导入
       const res = await youtubeApi.importVideo(url);
       const { videoId } = res.data;
 
-      // 更新 state 中的 videoId
-      setYtImports(prev => {
-        const next = new Map(prev);
-        const s = next.get(importId);
-        if (s) {
-          next.delete(importId);
-          next.set(videoId, { ...s, videoId });
-        }
-        return next;
-      });
-
-      // 订阅 SSE 进度
+      // 订阅 SSE 进度，实时更新对话消息
       const unsub = youtubeApi.subscribeProgress(videoId, (stage, detail) => {
-        setYtImports(prev => {
-          const next = new Map(prev);
-          const s = next.get(videoId);
-          if (s) {
-            next.set(videoId, {
-              ...s, stage, detail,
-              done: stage === 'done',
-              error: stage === 'error',
-            });
-          }
-          return next;
-        });
-
-        if (stage === 'done') {
+        const isDone = stage === 'done';
+        const isError = stage === 'error';
+        setMessages(prev => prev.map(m =>
+          m.id === progressMsgId
+            ? { ...m, content: makeContent(stage, detail, isDone, isError), isStreaming: !isDone && !isError, messageType: 'progress' as const }
+            : m
+        ));
+        if (isDone) {
           unsub();
-          onVideoImported?.();  // 通知父组件刷新视频列表
-          // 在聊天中添加完成消息
-          setMessages(prev => [...prev, {
-            id: uuidv4(), role: 'assistant',
-            content: `✅ YouTube 视频已成功导入并分析完成！\n\n视频已添加到左侧视频库中，选中后可查看 Gemini 分析结果和创作亮点建议。`,
-            timestamp: new Date(),
-          }]);
+          onVideoImported?.();
         }
-        if (stage === 'error') unsub();
+        if (isError) unsub();
       });
 
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setYtImports(prev => {
-        const next = new Map(prev);
-        const s = next.get(importId);
-        if (s) next.set(importId, { ...s, stage: 'error', detail: msg, error: true });
-        return next;
-      });
+      setMessages(prev => prev.map(m =>
+        m.id === progressMsgId
+          ? { ...m, content: makeContent('error', msg, false, true), isStreaming: false, messageType: 'progress' as const }
+          : m
+      ));
     }
   }, [onVideoImported]);
 
@@ -205,7 +267,10 @@ export default function AIAssistant({ selectedVideo, videos, onVideoImported }: 
         .filter(m => m.id !== 'welcome')
         .map(m => ({ role: m.role, content: m.content }));
 
-      const res = await aiApi.chat(content, selectedVideo?.id, history);
+      const stylePrefix = settings.replyStyle === 'casual' ? '[请用轻松友好的口吻回复] ' : '';
+      const finalContent = stylePrefix ? stylePrefix + content : content;
+      const videoId = settings.autoContext ? selectedVideo?.id : undefined;
+      const res = await aiApi.chat(finalContent, videoId, history);
       const assistantMsg: ChatMessage = {
         id: uuidv4(), role: 'assistant',
         content: res.data.response,
@@ -255,14 +320,136 @@ export default function AIAssistant({ selectedVideo, videos, onVideoImported }: 
           </div>
           <span className="text-sm font-bold text-gray-800">AI 创作助手</span>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          {messages.filter(m => m.id !== 'welcome').length > 0 && (
+            <span className="text-[10px] text-gray-400 font-medium">
+              {messages.filter(m => m.id !== 'welcome').length} 条记录
+            </span>
+          )}
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500 hover:text-gray-800 hover:border-gray-300 hover:bg-white transition-all font-medium"
-        >
-          <LayoutGrid className="w-3.5 h-3.5" />
-          多视频分析
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500 hover:text-gray-800 hover:border-gray-300 hover:bg-white transition-all font-medium"
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            多视频分析
+          </button>
+          {/* 设置入口 */}
+          <div className="relative" ref={settingsPanelRef}>
+            <button
+              onClick={() => { setShowSettings(v => !v); setClearConfirm(false); }}
+              className={`p-1.5 rounded-lg border transition-all ${
+                showSettings
+                  ? 'bg-violet-50 border-violet-200 text-violet-600'
+                  : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-white hover:border-gray-300'
+              }`}
+              title="AI 助手设置"
+            >
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </button>
+
+            {/* 设置面板 */}
+            {showSettings && (
+              <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                {/* 面板标题 */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                  <span className="text-xs font-bold text-gray-700">AI 助手设置</span>
+                  <button
+                    onClick={() => { setShowSettings(false); setClearConfirm(false); }}
+                    className="p-0.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-all"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+
+                <div className="p-3 space-y-3">
+                  {/* 当前模型 */}
+                  <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-violet-50 border border-violet-100">
+                    <Cpu className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-violet-400 font-medium">当前模型</div>
+                      <div className="text-xs font-semibold text-violet-700 truncate">Gemini 2.5 Flash</div>
+                    </div>
+                  </div>
+
+                  {/* 回复风格 */}
+                  <div>
+                    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5 px-0.5">
+                      回复风格
+                    </div>
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                      {(['professional', 'casual'] as const).map((style, idx) => (
+                        <button
+                          key={style}
+                          onClick={() => updateSettings({ replyStyle: style })}
+                          className={`flex-1 py-1.5 text-xs font-medium transition-all ${
+                            idx === 0 ? '' : 'border-l border-gray-200'
+                          } ${
+                            settings.replyStyle === style
+                              ? 'bg-violet-600 text-white'
+                              : 'bg-white text-gray-500 hover:bg-gray-50'
+                          }`}
+                        >
+                          {style === 'professional' ? '📋 专业严谨' : '😊 轻松友好'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 自动附带视频上下文 */}
+                  <div className="flex items-center justify-between px-1">
+                    <div>
+                      <div className="text-xs font-medium text-gray-700">自动附带视频上下文</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">对话时自动关联当前选中的视频</div>
+                    </div>
+                    <button
+                      onClick={() => updateSettings({ autoContext: !settings.autoContext })}
+                      className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+                        settings.autoContext ? 'bg-violet-600' : 'bg-gray-200'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                        settings.autoContext ? 'translate-x-4' : 'translate-x-0.5'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* 对话统计 */}
+                  <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                    <MessageSquare className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <div className="text-xs text-gray-500">
+                      已有 <span className="font-semibold text-gray-700">{messages.filter(m => m.id !== 'welcome').length}</span> 条对话记录（全局保存）
+                    </div>
+                  </div>
+
+                  {/* 清除对话记录 */}
+                  <div className="border-t border-gray-100 pt-2">
+                    <button
+                      onClick={handleClearChat}
+                      className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${
+                        clearConfirm
+                          ? 'bg-red-500 text-white hover:bg-red-600'
+                          : 'text-red-500 border border-red-200 hover:bg-red-50'
+                      }`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {clearConfirm ? '确认清除全部对话？' : '清除所有对话记录'}
+                    </button>
+                    {clearConfirm && (
+                      <button
+                        onClick={() => setClearConfirm(false)}
+                        className="w-full mt-1.5 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all flex items-center justify-center gap-1"
+                      >
+                        <ChevronRight className="w-3 h-3 rotate-180" />
+                        取消
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Current video indicator */}
@@ -300,15 +487,19 @@ export default function AIAssistant({ selectedVideo, videos, onVideoImported }: 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {messages.map(msg => (
           <div key={msg.id} className={`flex gap-2.5 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-            {/* Avatar */}
+            {/* Avatar：用户 / AI 助手 / 进度任务 区分 */}
             <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${
-              msg.role === 'assistant'
-                ? 'bg-gradient-to-br from-violet-600 to-purple-700 shadow-sm'
-                : 'bg-gray-200'
+              msg.role === 'user'
+                ? 'bg-gray-200'
+                : msg.messageType === 'progress'
+                ? 'bg-red-500 shadow-sm'
+                : 'bg-gradient-to-br from-violet-600 to-purple-700 shadow-sm'
             }`}>
-              {msg.role === 'assistant'
-                ? <Sparkles className="w-3.5 h-3.5 text-white" />
-                : <User className="w-3.5 h-3.5 text-gray-500" />}
+              {msg.role === 'user'
+                ? <User className="w-3.5 h-3.5 text-gray-500" />
+                : msg.messageType === 'progress'
+                ? <Youtube className="w-3.5 h-3.5 text-white" />
+                : <Sparkles className="w-3.5 h-3.5 text-white" />}
             </div>
 
             {/* Bubble */}
@@ -316,15 +507,31 @@ export default function AIAssistant({ selectedVideo, videos, onVideoImported }: 
               <div className={`px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-gray-900 text-white rounded-tr-sm'
+                  : msg.messageType === 'progress'
+                  ? msg.isStreaming
+                    ? 'bg-red-50 border border-red-100 text-red-800 rounded-tl-sm'
+                    : 'bg-red-50/70 border border-red-100 text-gray-700 rounded-tl-sm'
+                  : msg.isStreaming
+                  ? 'bg-violet-50 border border-violet-100 text-violet-700 rounded-tl-sm'
                   : 'bg-gray-50 border border-gray-100 text-gray-700 rounded-tl-sm'
               }`}>
-                {msg.role === 'assistant'
-                  ? <div className="ai-message-content">{renderMarkdown(msg.content)}</div>
-                  : <span>{msg.content}</span>}
+                {msg.role === 'assistant' ? (
+                  <div className="ai-message-content">
+                    {msg.isStreaming && (
+                      <div className="flex items-center gap-2 mb-1">
+                        <Loader2 className={`w-3 h-3 animate-spin flex-shrink-0 ${msg.messageType === 'progress' ? 'text-red-400' : 'text-violet-400'}`} />
+                        <span className={`text-[11px] font-medium ${msg.messageType === 'progress' ? 'text-red-500' : 'text-violet-400'}`}>进行中...</span>
+                      </div>
+                    )}
+                    {renderMarkdown(msg.content)}
+                  </div>
+                ) : (
+                  <span>{msg.content}</span>
+                )}
               </div>
               <div className={`flex items-center gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 <span className="text-[10px] text-gray-400">{formatTime(msg.timestamp)}</span>
-                {msg.role === 'assistant' && (
+                {msg.role === 'assistant' && !msg.isStreaming && (
                   <button
                     onClick={() => handleCopy(msg.id, msg.content)}
                     className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
@@ -356,58 +563,35 @@ export default function AIAssistant({ selectedVideo, videos, onVideoImported }: 
           </div>
         )}
 
-        {/* YouTube 进度卡片 */}
-        {Array.from(ytImports.values()).map(yt => (
-          <div key={yt.videoId} className={`mx-1 p-3 rounded-xl border text-xs ${
-            yt.error ? 'bg-red-50 border-red-100' :
-            yt.done  ? 'bg-emerald-50 border-emerald-100' :
-                       'bg-rose-50 border-rose-100'
-          }`}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <Youtube className={`w-3.5 h-3.5 flex-shrink-0 ${yt.error ? 'text-red-500' : yt.done ? 'text-emerald-500' : 'text-red-500'}`} />
-              <span className="font-medium text-gray-700 truncate flex-1">{yt.title}</span>
-              {!yt.done && !yt.error && <Loader2 className="w-3 h-3 text-rose-400 animate-spin flex-shrink-0" />}
-              {yt.error && <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" />}
-            </div>
-            <div className={`text-[11px] ${yt.error ? 'text-red-600' : yt.done ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {YT_STAGE_LABELS[yt.stage] ?? yt.stage}{yt.detail && !yt.done ? ` — ${yt.detail}` : ''}
-            </div>
-          </div>
-        ))}
-
-        {/* YouTube 导入确认弹窗 */}
+        {/* YouTube 导入确认卡 */}
         {pendingYtUrl && (
-          <div className="mx-1 p-3 rounded-xl border bg-rose-50 border-rose-100">
-            <div className="flex items-center gap-2 mb-2">
-              <Youtube className="w-4 h-4 text-red-500 flex-shrink-0" />
-              <span className="text-xs font-semibold text-gray-800">检测到 YouTube 链接</span>
+          <div className="flex gap-2.5">
+            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-red-100 flex items-center justify-center">
+              <Youtube className="w-3.5 h-3.5 text-red-500" />
             </div>
-            <p className="text-[11px] text-gray-500 mb-3 break-all">{pendingYtUrl}</p>
-            <p className="text-[11px] text-gray-600 mb-3">
-              是否下载该视频并进行 AI 分析？分析完成后视频将自动添加到左侧视频库，并生成创作亮点报告。
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  startYouTubeImport(pendingYtUrl);
-                  setPendingYtUrl(null);
-                  setMessages(prev => [...prev, {
-                    id: uuidv4(), role: 'assistant',
-                    content: `好的，我来帮你分析这个 YouTube 视频！\n\n正在下载并分析视频内容，完成后会为你提取：\n• 🎣 钩子设计与开场策略\n• 📐 内容结构与节奏分析\n• 🔥 爆款核心要素\n• 🇨🇳 中文平台适配建议\n• ✂️ 可复制的创作技巧`,
-                    timestamp: new Date(),
-                  }]);
-                }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-red-500 text-white text-xs font-medium hover:bg-red-600 transition-colors"
-              >
-                <Download className="w-3 h-3" />
-                导入并分析
-              </button>
-              <button
-                onClick={() => setPendingYtUrl(null)}
-                className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
-              >
-                取消
-              </button>
+            <div className="flex-1 max-w-[85%]">
+              <div className="px-3.5 py-3 rounded-2xl rounded-tl-sm bg-gray-50 border border-gray-100 text-[13px]">
+                <p className="font-semibold text-gray-800 mb-1">检测到 YouTube 链接</p>
+                <p className="text-[11px] text-gray-400 mb-2.5 break-all">{pendingYtUrl}</p>
+                <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                  是否下载该视频并进行 AI 分析？完成后将自动添加到视频库并生成创作报告。
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { startYouTubeImport(pendingYtUrl); setPendingYtUrl(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-medium hover:bg-red-600 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    导入并分析
+                  </button>
+                  <button
+                    onClick={() => setPendingYtUrl(null)}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

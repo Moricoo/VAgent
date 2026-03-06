@@ -13,6 +13,7 @@ import {
 } from '../data/store';
 import { Video, VideoAnalysis, VideoSegment } from '../types';
 import { analyzeVideoWithGemini, getVideoDuration } from '../services/gemini';
+import { logVideoAnalysis } from '../utils/aiLogger';
 
 const router = Router();
 
@@ -230,7 +231,7 @@ router.post('/analyze', async (req: AuthRequest, res: Response) => {
   const targets: Video[] = [];
   for (const id of videoIds) {
     const v = getVideoById(id);
-    if (v && v.userId === req.userId && v.status !== 'analyzed') {
+    if (v && v.userId === req.userId && (v.status !== 'analyzed' || !v.analysis)) {
       updateVideo(id, { status: 'analyzing' });
       targets.push({ ...v, status: 'analyzing' });
     }
@@ -277,6 +278,14 @@ async function runAnalysis(video: Video): Promise<void> {
       });
 
       setProgress('done', `✅ Gemini 分析完成（${result.duration}秒，${result.analysis.segments.length}个片段）`);
+      logVideoAnalysis({
+        videoId: id,
+        name,
+        hasRealFile: true,
+        success: true,
+        duration: result.duration,
+        segmentsCount: result.analysis.segments.length,
+      });
       console.log(`[分析][${name}] ✅ Gemini 分析完成`);
     } else {
       // ── Mock analysis for demo videos without files ───────
@@ -307,11 +316,27 @@ async function runAnalysis(video: Video): Promise<void> {
       });
 
       setProgress('done', '✅ 演示分析完成');
+      logVideoAnalysis({
+        videoId: id,
+        name,
+        hasRealFile: false,
+        success: true,
+        duration: realDuration || duration,
+        segmentsCount: mockAnalysis.segments.length,
+      });
       console.log(`[分析][${name}] ✅ 演示模式完成（无文件）`);
     }
   } catch (err: unknown) {
     const stack = err instanceof Error ? err.stack : String(err);
     const message = err instanceof Error ? err.message : String(err);
+    const hasRealFile = !!(filePath && fs.existsSync(filePath));
+    logVideoAnalysis({
+      videoId: id,
+      name,
+      hasRealFile,
+      success: false,
+      error: message,
+    });
     console.error(`[分析][${name}] ❌ 完整错误:\n${stack}`);
     console.error(`[分析][${name}] ❌ 分析失败:`, message);
     setProgress('error', `分析失败：${message}`);
@@ -353,19 +378,25 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
   res.json(video);
 });
 
-// ── PATCH /videos/:id – rename ────────────────────────────────
+// ── PATCH /videos/:id – 更新名称或分类 ────────────────────────────────
 router.patch('/:id', (req: AuthRequest, res: Response) => {
   const video = getVideoById(req.params.id);
   if (!video || video.userId !== req.userId) {
     res.status(404).json({ message: '视频不存在' });
     return;
   }
-  const { name } = req.body as { name?: string };
-  if (!name || !name.trim()) {
-    res.status(400).json({ message: '名称不能为空' });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const { name, category } = body as { name?: string; category?: string };
+  const updates: { name?: string; category?: string } = {};
+  const nameTrimmed = name !== undefined && name !== null ? String(name).trim() : '';
+  const categoryTrimmed = category !== undefined && category !== null ? String(category).trim() : '';
+  if (nameTrimmed) updates.name = nameTrimmed;
+  if (categoryTrimmed) updates.category = categoryTrimmed;
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ message: '请提供 name 或 category' });
     return;
   }
-  const updated = updateVideo(req.params.id, { name: name.trim() });
+  const updated = updateVideo(req.params.id, updates);
   res.json(updated);
 });
 

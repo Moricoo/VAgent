@@ -15,6 +15,7 @@ import {
   YouTubeVideoInfo,
 } from '../services/youtube';
 import { analyzeVideoWithGemini } from '../services/gemini';
+import { logYoutubeAnalysis } from '../utils/aiLogger';
 
 const router = Router();
 router.use(authMiddleware);
@@ -182,16 +183,36 @@ async function runYouTubeImport(
     let youtubeHighlights = '';
 
     try {
-      const geminiResult = await analyzeVideoWithGemini(filePath, 'video/mp4', (stage, detail) => {
-        setProgress(stage, detail ?? stage);
-      });
+      const geminiResult = await analyzeVideoWithGemini(
+        filePath,
+        info.title || 'YouTube Video',
+        info.duration || 0,
+        (stage, detail) => setProgress(stage, detail ?? stage),
+      );
       geminiAnalysis = geminiResult.analysis;
       updateVideo(videoId, {
         status: 'analyzed',
         analysis: geminiAnalysis,
         videoLabel: geminiResult.videoLabel,
+        category: geminiResult.category,
+        tags: geminiResult.tags,
+        duration: geminiResult.duration,
+      });
+      logYoutubeAnalysis({
+        videoId,
+        title: info.title || 'YouTube Video',
+        success: true,
+        duration: geminiResult.duration,
+        segmentsCount: geminiResult.analysis.segments.length,
       });
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logYoutubeAnalysis({
+        videoId,
+        title: info.title || 'YouTube Video',
+        success: false,
+        error: errMsg,
+      });
       console.warn('[YouTube] Gemini 内容分析失败，继续创作亮点分析:', err);
     }
 

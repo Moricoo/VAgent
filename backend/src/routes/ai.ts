@@ -3,6 +3,7 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getVideoById } from '../data/store';
 import { Video } from '../types';
 import { chatWithVideo, analyzeMultipleVideos, HistoryMessage } from '../services/aiGraph';
+import { logChat, logMultiAnalysis } from '../utils/aiLogger';
 
 const router = Router();
 router.use(authMiddleware);
@@ -41,11 +42,31 @@ router.post('/chat', async (req: AuthRequest, res: Response) => {
     ? history.slice(-20)  // 最多保留最近 20 条历史
     : [];
 
+  const messageTrimmed = message.trim();
   try {
-    const response = await chatWithVideo(message.trim(), video, safeHistory);
+    const response = await chatWithVideo(messageTrimmed, video, safeHistory);
+    logChat({
+      userId: req.userId!,
+      videoId: videoId ?? null,
+      message: messageTrimmed,
+      messageLen: messageTrimmed.length,
+      historyLen: safeHistory.length,
+      success: true,
+      response,
+      responseLen: response?.length ?? 0,
+    });
     res.json({ response });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    logChat({
+      userId: req.userId!,
+      videoId: videoId ?? null,
+      message: messageTrimmed,
+      messageLen: messageTrimmed.length,
+      historyLen: safeHistory.length,
+      success: false,
+      error: msg,
+    });
     console.error('[AI Chat] 错误:', msg);
     res.status(500).json({ message: `AI 服务暂时不可用：${msg}` });
   }
@@ -78,15 +99,31 @@ router.post('/multi-analysis', async (req: AuthRequest, res: Response) => {
     ? history.slice(-20)
     : [];
 
+  const requestText = request || '请对这些视频进行综合分析并给出创作建议';
   try {
-    const response = await analyzeMultipleVideos(
-      videos,
-      request || '请对这些视频进行综合分析并给出创作建议',
-      safeHistory,
-    );
+    const response = await analyzeMultipleVideos(videos, requestText, safeHistory);
+    logMultiAnalysis({
+      userId: req.userId!,
+      videoCount: videos.length,
+      videoIds: videoIds.join(','),
+      request: requestText,
+      requestLen: requestText.length,
+      success: true,
+      response,
+      responseLen: response?.length ?? 0,
+    });
     res.json({ response });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    logMultiAnalysis({
+      userId: req.userId!,
+      videoCount: videos.length,
+      videoIds: videoIds.join(','),
+      request: requestText,
+      requestLen: requestText.length,
+      success: false,
+      error: msg,
+    });
     console.error('[AI Multi] 错误:', msg);
     res.status(500).json({ message: `AI 服务暂时不可用：${msg}` });
   }

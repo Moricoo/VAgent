@@ -15,7 +15,7 @@ const COL1_MAX = 420;
 const COL3_MIN = 260;
 const COL3_MAX = 520;
 
-export default function AppPage() {
+function AppPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [videos, setVideos] = useState<VideoType[]>([]);
@@ -111,6 +111,24 @@ export default function AppPage() {
 
   const handleSelectVideo = (video: VideoType) => setSelectedVideo(video);
 
+  const handleReanalyze = useCallback(async (videoId: string) => {
+    try {
+      await videosApi.analyze([videoId]);
+      await fetchVideos(true);
+    } catch (err) {
+      console.error('重新分析失败', err);
+    }
+  }, [fetchVideos]);
+
+  const handleCategoryChange = useCallback(async (videoId: string, category: string) => {
+    try {
+      await videosApi.update(videoId, { category });
+      await fetchVideos(true);
+    } catch (err) {
+      console.error('更新分类失败', err);
+    }
+  }, [fetchVideos]);
+
   const handleVideosChange = (updated: VideoType[]) => {
     setVideos(updated);
     if (selectedVideo) {
@@ -190,7 +208,7 @@ export default function AppPage() {
 
         {/* Column 2: Video Detail */}
         <div className="flex-1 min-w-[280px] bg-white flex flex-col overflow-hidden">
-          <VideoDetail video={selectedVideo} />
+          <VideoDetail video={selectedVideo} onReanalyze={handleReanalyze} onCategoryChange={handleCategoryChange} />
         </div>
 
         {/* Resize handle 2 */}
@@ -220,3 +238,5 @@ export default function AppPage() {
     </div>
   );
 }
+
+export default AppPage;

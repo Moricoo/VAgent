@@ -1,23 +1,28 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize2, Film,
-  Clock, Tag, Sparkles, ChevronRight, Info, BarChart2
+  Clock, Tag, Sparkles, ChevronRight, Info, BarChart2, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { Video, VideoSegment } from '../types';
 
 interface Props {
   video: Video | null;
+  onReanalyze?: (videoId: string) => void;
+  onCategoryChange?: (videoId: string, category: string) => void | Promise<void>;
 }
 
-export default function VideoDetail({ video }: Props) {
+export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const categoryInputRef = useRef<HTMLInputElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [activeSegment, setActiveSegment] = useState<VideoSegment | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(false);
+  const [editCategoryValue, setEditCategoryValue] = useState('');
 
   const segments = video?.analysis?.segments || [];
   const effectiveDuration = duration > 0 ? duration : (video?.duration || 875);
@@ -26,11 +31,23 @@ export default function VideoDetail({ video }: Props) {
     setPlaying(false);
     setCurrentTime(0);
     setActiveSegment(null);
+    setEditingCategory(false);
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
   }, [video?.id]);
+
+  useEffect(() => {
+    if (editingCategory && categoryInputRef.current) {
+      categoryInputRef.current.focus();
+      categoryInputRef.current.select();
+    }
+  }, [editingCategory]);
+
+  useEffect(() => {
+    if (!editingCategory && video) setEditCategoryValue(video.category);
+  }, [video?.category, editingCategory, video]);
 
   useEffect(() => {
     if (segments.length > 0 && !isDragging) {
@@ -90,6 +107,37 @@ export default function VideoDetail({ video }: Props) {
 
   const progressPercent = effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0;
 
+  const startEditCategory = () => {
+    if (!video || !onCategoryChange) return;
+    setEditCategoryValue(video.category);
+    setEditingCategory(true);
+  };
+
+  const commitCategory = () => {
+    const trimmed = editCategoryValue.trim();
+    if (!video || !onCategoryChange) {
+      setEditingCategory(false);
+      return;
+    }
+    if (!trimmed) {
+      setEditCategoryValue(video.category);
+      setEditingCategory(false);
+      return;
+    }
+    if (trimmed !== video.category) {
+      Promise.resolve(onCategoryChange(video.id, trimmed))
+        .then(() => setEditingCategory(false))
+        .catch(() => setEditingCategory(false));
+    } else {
+      setEditingCategory(false);
+    }
+  };
+
+  const cancelCategoryEdit = () => {
+    setEditCategoryValue(video?.category ?? '');
+    setEditingCategory(false);
+  };
+
   if (!video) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-8 bg-gray-50">
@@ -110,9 +158,34 @@ export default function VideoDetail({ video }: Props) {
       <div className="flex-shrink-0 flex items-center gap-2.5 px-4 py-3 border-b border-gray-100 bg-white min-w-0">
         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: video.thumbnailColor }} />
         <span className="text-sm font-bold text-gray-800 truncate flex-1 min-w-0">{video.name}</span>
-        <span className="flex-shrink-0 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-gray-100 text-gray-600">
-          {video.category}
-        </span>
+        {editingCategory ? (
+          <input
+            ref={categoryInputRef}
+            value={editCategoryValue}
+            onChange={e => setEditCategoryValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                commitCategory();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelCategoryEdit();
+              }
+            }}
+            onBlur={commitCategory}
+            className="flex-shrink-0 w-20 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-white border border-violet-300 text-gray-700 focus:outline-none focus:ring-1 focus:ring-violet-400"
+          />
+        ) : (
+          <span
+            onDoubleClick={startEditCategory}
+            className={`flex-shrink-0 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-gray-100 text-gray-600 ${onCategoryChange ? 'cursor-text hover:bg-gray-200' : ''}`}
+            title={onCategoryChange ? '双击修改分类' : undefined}
+          >
+            {video.category}
+          </span>
+        )}
         {video.videoLabel && (
           <span className="flex-shrink-0 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-violet-50 text-violet-600 border border-violet-100">
             {video.videoLabel}
@@ -192,6 +265,7 @@ export default function VideoDetail({ video }: Props) {
 
         {/* Analysis content */}
         {video.status === 'analyzed' && video.analysis ? (
+          // ── 分析完整，正常展示 ────────────────────────────────────────
           <div className="p-4 space-y-5">
             {/* Timeline */}
             <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
@@ -342,7 +416,29 @@ export default function VideoDetail({ video }: Props) {
               </div>
             </div>
           </div>
+        ) : video.status === 'analyzed' && !video.analysis ? (
+          // ── 分析完成但无数据（网络超时等原因）────────────────────────
+          <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-7 h-7 text-amber-500" />
+            </div>
+            <h3 className="text-sm font-bold text-gray-700 mb-1.5">分析结果丢失</h3>
+            <p className="text-xs text-gray-400 max-w-xs leading-relaxed mb-4">
+              视频已下载完成，但 AI 分析过程中发生网络超时，导致分析结果未能保存。
+              点击下方按钮重新触发分析。
+            </p>
+            {onReanalyze && (
+              <button
+                onClick={() => onReanalyze(video.id)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors shadow-sm"
+              >
+                <RefreshCw className="w-4 h-4" />
+                重新分析
+              </button>
+            )}
+          </div>
         ) : video.status === 'analyzing' ? (
+          // ── 分析进行中 ────────────────────────────────────────────────
           <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
             <div className="relative w-14 h-14 mb-5">
               <div className="absolute inset-0 rounded-full border-2 border-violet-200" />
@@ -355,6 +451,7 @@ export default function VideoDetail({ video }: Props) {
             <p className="text-xs text-gray-400">正在识别场景、动作片段和精彩高潮，请稍候</p>
           </div>
         ) : (
+          // ── 待分析 ────────────────────────────────────────────────────
           <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
             <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
               <Sparkles className="w-6 h-6 text-gray-300" />

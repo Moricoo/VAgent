@@ -5,8 +5,12 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffprobeStatic from 'ffprobe-static';
 import { VideoAnalysis, VideoSegment } from '../types';
 
-export const GEMINI_API_KEY = 'AIzaSyD5OW8VPcBvzd5Gi7Yfn2ZwgaziCXCsGP4';
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+if (!GEMINI_API_KEY) {
+  console.error('❌ 错误：未设置 GEMINI_API_KEY 环境变量，请在 backend/.env 文件中配置');
+}
 
 ffmpeg.setFfprobePath(ffprobeStatic.path);
 

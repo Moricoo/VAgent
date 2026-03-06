@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+// 开发时直连后端，避免 Vite 代理对 PATCH 请求体转发异常
+const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: isDev ? 'http://localhost:3001/api' : '/api',
   timeout: 90000,  // AI 请求包含两次 LLM 调用，需要更长超时
 });
 
@@ -43,6 +45,13 @@ export const videosApi = {
   analyze: (videoIds: string[]) =>
     api.post('/videos/analyze', { videoIds }),
   rename: (id: string, name: string) => api.patch(`/videos/${id}`, { name }),
+  update: (id: string, payload: { name?: string; category?: string }) =>
+    api.request({
+      method: 'PATCH',
+      url: `/videos/${id}`,
+      data: payload,
+      headers: { 'Content-Type': 'application/json' },
+    }),
   delete: (id: string) => api.delete(`/videos/${id}`),
   /** Subscribe to SSE progress for a single video analysis */
   subscribeProgress: (
