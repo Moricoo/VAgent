@@ -22,6 +22,7 @@ logs/
 # Uploads / user data
 backend/uploads/
 backend/data/
+backend/docs/
 
 # PID files
 *.pid
