@@ -1,5 +1,5 @@
 /**
- * VAgent AI 创作助手 — Multi-Agent 架构
+ * 点子 AI 创作助手 — Multi-Agent 架构
  *
  * 设计模式（LangGraph 风格）：
  *
@@ -107,7 +107,7 @@ function buildMultiVideoContext(videos: Video[]): string {
 
 const AGENT_PROMPTS: Record<AgentName, string> = {
 
-  general_chat: `你是 VAgent AI 助手，一个智能、友好、灵活的对话伙伴。
+  general_chat: `你是 点子 AI 助手，一个智能、友好、灵活的对话伙伴。
 你能自由地与用户交流，回答任何问题，遵从用户的任何指令（例如角色扮演、复述、格式要求等）。
 你同时了解短视频创作领域，如果用户提到视频相关的话题，你也能给出专业建议。
 **请严格遵守用户给你的任何指令，包括回复格式、语气、内容等。**

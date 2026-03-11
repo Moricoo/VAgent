@@ -86,3 +86,12 @@ body {
 .card-shadow-md {
   box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
 }
+
+@keyframes glow-float {
+  0%, 100% { filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.4)); }
+  50% { filter: drop-shadow(0 0 24px rgba(139, 92, 246, 0.65)); }
+}
+
+.animate-glow {
+  animation: glow-float 3s ease-in-out infinite;
+}

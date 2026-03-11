@@ -37,6 +37,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }>
 
 export default function VideoLibrary({ videos, selectedVideo, loading, onSelectVideo, onVideosChange }: Props) {
   const [search, setSearch] = useState('');
+  const [deepSearch, setDeepSearch] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [sortType, setSortType] = useState<SortType>('date-desc');
   const [batchSelectMode, setBatchSelectMode] = useState(false);
@@ -80,11 +81,27 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
     let result = [...videos];
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter(v =>
-        v.name.toLowerCase().includes(q) ||
-        v.tags.some(t => t.toLowerCase().includes(q)) ||
-        v.category.toLowerCase().includes(q)
-      );
+      result = result.filter(v => {
+        const matchBasic =
+          v.name.toLowerCase().includes(q) ||
+          v.tags.some(t => t.toLowerCase().includes(q)) ||
+          v.category.toLowerCase().includes(q);
+        if (matchBasic) return true;
+        if (!deepSearch) return false;
+        // 深度搜索：摘要、精彩片段、videoLabel、分段、剪辑建议、推荐标题/标签
+        const analysisText: string[] = [];
+        if (v.videoLabel) analysisText.push(v.videoLabel);
+        if (v.analysis) {
+          analysisText.push(v.analysis.summary, v.analysis.highlights);
+          analysisText.push(v.analysis.suggestedTitle, ...v.analysis.suggestedTags);
+          analysisText.push(...v.analysis.editingTips);
+          for (const seg of v.analysis.segments || []) {
+            analysisText.push(seg.label, seg.description);
+          }
+        }
+        const combined = analysisText.filter(Boolean).join(' ').toLowerCase();
+        return combined.includes(q);
+      });
     }
     if (categoryFilter !== '全部') {
       result = result.filter(v => v.category === categoryFilter);
@@ -95,7 +112,7 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
       case 'name':      result.sort((a, b) => a.name.localeCompare(b.name)); break;
     }
     return result;
-  }, [videos, search, categoryFilter, sortType]);
+  }, [videos, search, deepSearch, categoryFilter, sortType]);
 
   const pendingVideos = videos.filter(v => v.status === 'pending');
   const analyzingVideos = videos.filter(v => v.status === 'analyzing');
@@ -235,16 +252,27 @@ export default function VideoLibrary({ videos, selectedVideo, loading, onSelectV
           )}
         </div>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="搜索视频..."
-            className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 transition-all"
-          />
+        {/* Search + 深度搜索 */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="搜索视频..."
+              className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-100 transition-all"
+            />
+          </div>
+          <label className="flex items-center gap-1.5 flex-shrink-0 cursor-pointer select-none text-[11px] text-gray-600 hover:text-gray-800">
+            <input
+              type="checkbox"
+              checked={deepSearch}
+              onChange={e => setDeepSearch(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+            />
+            深度搜索
+          </label>
         </div>
 
         {/* Category + Sort */}

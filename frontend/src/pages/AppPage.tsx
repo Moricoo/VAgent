@@ -146,7 +146,7 @@ function AppPage() {
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center shadow-sm">
             <Video className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="font-bold text-[14px] text-gray-900">VAgent</span>
+          <span className="font-bold text-[14px] text-gray-900">点子</span>
           <span className="text-[10px] text-violet-600 font-semibold ml-1 px-1.5 py-0.5 rounded-md bg-violet-50 border border-violet-100">
             Beta
           </span>
@@ -208,7 +208,15 @@ function AppPage() {
 
         {/* Column 2: Video Detail */}
         <div className="flex-1 min-w-[280px] bg-white flex flex-col overflow-hidden">
-          <VideoDetail video={selectedVideo} onReanalyze={handleReanalyze} onCategoryChange={handleCategoryChange} />
+          <VideoDetail
+            video={selectedVideo}
+            onReanalyze={handleReanalyze}
+            onCategoryChange={handleCategoryChange}
+            onLocalAnalysisDone={(updated) => {
+              setSelectedVideo(updated);
+              setVideos(prev => prev.map(v => v.id === updated.id ? updated : v));
+            }}
+          />
         </div>
 
         {/* Resize handle 2 */}

@@ -26,11 +26,11 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/youtube', youtubeRoutes);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', message: 'VAgent后端服务正常运行' });
+  res.json({ status: 'ok', message: '点子后端服务正常运行' });
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ VAgent 后端服务启动成功: http://localhost:${PORT}`);
+  console.log(`✅ 点子 后端服务启动成功: http://localhost:${PORT}`);
   console.log(`📁 文件服务地址: http://localhost:${PORT}/uploads`);
   console.log(`\n演示账号:`);
   console.log(`  用户名: admin  密码: admin123`);

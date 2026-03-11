@@ -1,19 +1,61 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize2, Film,
-  Clock, Tag, Sparkles, ChevronRight, Info, BarChart2, AlertTriangle, RefreshCw
+  Clock, Tag, Sparkles, ChevronRight, Info, BarChart2, AlertTriangle, RefreshCw, Crosshair
 } from 'lucide-react';
 import { Video, VideoSegment } from '../types';
+import { videosApi } from '../api/client';
 
 interface Props {
   video: Video | null;
   onReanalyze?: (videoId: string) => void;
   onCategoryChange?: (videoId: string, category: string) => void | Promise<void>;
+  onLocalAnalysisDone?: (updatedVideo: Video) => void;
 }
 
-export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Props) {
+/** 将精准定位的 时间段 合并为不重叠区间，再生成 [0, duration] 上的动作/非动作段，动作段带分类标签 */
+function buildActionTimelineSegments(
+  detections: Array<{ 动作: string; 时间段: [number, number] }>,
+  duration: number
+): Array<{ start: number; end: number; isAction: boolean; label?: string }> {
+  if (!detections?.length || duration <= 0) return [];
+  const sorted = [...detections]
+    .map(d => ({ start: d.时间段[0], end: d.时间段[1], 动作: d.动作 }))
+    .filter(r => r.end > r.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number; labels: string[] }> = [];
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end) {
+      last.end = Math.max(last.end, r.end);
+      if (!last.labels.includes(r.动作)) last.labels.push(r.动作);
+    } else {
+      merged.push({ start: r.start, end: r.end, labels: [r.动作] });
+    }
+  }
+  const out: Array<{ start: number; end: number; isAction: boolean; label?: string }> = [];
+  let t = 0;
+  for (const r of merged) {
+    const start = Math.max(0, Math.min(r.start, duration));
+    const end = Math.max(0, Math.min(r.end, duration));
+    if (t < start - 1e-6) {
+      out.push({ start: t, end: start, isAction: false });
+    }
+    if (end > start + 1e-6) {
+      out.push({ start, end, isAction: true, label: r.labels.join('、') });
+    }
+    t = end;
+  }
+  if (t < duration - 1e-6) {
+    out.push({ start: t, end: duration, isAction: false });
+  }
+  return out;
+}
+
+export default function VideoDetail({ video, onReanalyze, onCategoryChange, onLocalAnalysisDone }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const actionTimelineRef = useRef<HTMLDivElement>(null);
   const categoryInputRef = useRef<HTMLInputElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -23,6 +65,8 @@ export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Pr
   const [isDragging, setIsDragging] = useState(false);
   const [editingCategory, setEditingCategory] = useState(false);
   const [editCategoryValue, setEditCategoryValue] = useState('');
+  const [localAnalyzing, setLocalAnalyzing] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const segments = video?.analysis?.segments || [];
   const effectiveDuration = duration > 0 ? duration : (video?.duration || 875);
@@ -138,6 +182,23 @@ export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Pr
     setEditingCategory(false);
   };
 
+  const handlePreciseLocate = async () => {
+    if (!video?.id || localAnalyzing) return;
+    setLocalError(null);
+    setLocalAnalyzing(true);
+    try {
+      const { data } = await videosApi.analyzeLocal(video.id, 0.2);
+      onLocalAnalysisDone?.(data);
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { message?: string } } }).response?.data?.message
+        : err instanceof Error ? err.message : String(err);
+      setLocalError(msg || '精准定位失败');
+    } finally {
+      setLocalAnalyzing(false);
+    }
+  };
+
   if (!video) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-8 bg-gray-50">
@@ -154,6 +215,7 @@ export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Pr
 
   return (
     <div className="flex flex-col h-full">
+      {/* 精准定位按钮（详情页上方） */}
       {/* Video Title Bar */}
       <div className="flex-shrink-0 flex items-center gap-2.5 px-4 py-3 border-b border-gray-100 bg-white min-w-0">
         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: video.thumbnailColor }} />
@@ -269,12 +331,88 @@ export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Pr
           <div className="p-4 space-y-5">
             {/* Timeline */}
             <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
-              <div className="flex items-center justify-between mb-3">
+              {/* 精彩动作瞬间（动作时间轴 + 精准定位按钮在右上角） */}
+              <div className="mb-4 pb-4 border-b border-gray-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    <Crosshair className="w-4 h-4 text-violet-600" />
+                    精彩动作瞬间
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handlePreciseLocate}
+                    disabled={localAnalyzing}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    {localAnalyzing ? '分析中…' : '精准定位'}
+                  </button>
+                </div>
+                {localError && (
+                  <p className="text-xs text-red-600 flex items-center gap-1 mb-2">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    {localError}
+                  </p>
+                )}
+                {(video.localDetections?.detections?.length ?? 0) > 0 ? (() => {
+                  const dets = video.localDetections!.detections;
+                  const actionSegments = buildActionTimelineSegments(dets, effectiveDuration);
+                  if (actionSegments.length === 0) return null;
+                  return (
+                    <>
+                      <div
+                        ref={actionTimelineRef}
+                        className="relative h-9 rounded-lg overflow-hidden cursor-pointer select-none shadow-inner mb-2"
+                        style={{ background: '#e2e8f0' }}
+                        onClick={(e) => {
+                          const rect = actionTimelineRef.current?.getBoundingClientRect();
+                          if (!rect) return;
+                          const ratio = (e.clientX - rect.left) / rect.width;
+                          seekTo(Math.max(0, Math.min(effectiveDuration, ratio * effectiveDuration)));
+                        }}
+                      >
+                        <div className="flex h-full">
+                          {actionSegments.map((seg, i) => {
+                            const widthPct = ((seg.end - seg.start) / effectiveDuration) * 100;
+                            return (
+                              <div
+                                key={i}
+                                className="h-full border-r border-white/30 last:border-r-0 relative flex items-center justify-center overflow-hidden"
+                                style={{
+                                  width: `${widthPct}%`,
+                                  backgroundColor: seg.isAction ? '#4c1d95' : '#f1f5f9',
+                                }}
+                              >
+                                {seg.isAction && seg.label && (
+                                  <span className="text-[9px] font-semibold text-white/95 truncate px-1 drop-shadow-sm absolute inset-0 flex items-center justify-center">
+                                    {seg.label}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-gray-800 shadow pointer-events-none z-10"
+                          style={{ left: `${progressPercent}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-gray-400 font-mono">
+                        <span>00:00</span>
+                        <span>{formatTime(effectiveDuration)}</span>
+                      </div>
+                    </>
+                  );
+                })() : video.localDetections ? (
+                  <p className="text-xs text-gray-500">未检测到动作</p>
+                ) : null}
+              </div>
+
+              <div className="mb-3">
                 <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-violet-500" />
-                  时序分析时间轴
+                  场景分析
                 </h3>
-                <span className="text-[10px] text-gray-400 font-medium">点击或拖拽跳转片段</span>
               </div>
 
               <div
@@ -462,6 +600,7 @@ export default function VideoDetail({ video, onReanalyze, onCategoryChange }: Pr
             </p>
           </div>
         )}
+
       </div>
     </div>
   );

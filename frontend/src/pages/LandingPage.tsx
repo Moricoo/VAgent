@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Video, Sparkles, Search, Brain, Play, ArrowRight, Zap, Shield, Clock, CheckCircle } from 'lucide-react';
+import { Video, Sparkles, Search, Brain, Clock, SearchCheck } from 'lucide-react';
 
 export default function LandingPage() {
   return (
@@ -11,100 +11,51 @@ export default function LandingPage() {
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center shadow-sm">
             <Video className="w-4 h-4 text-white" />
           </div>
-          <span className="font-bold text-[16px] tracking-tight text-gray-900">VAgent</span>
-        </div>
-        <div className="hidden md:flex items-center gap-8">
-          <a href="#features" className="text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium">功能特性</a>
-          <a href="#how" className="text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium">使用方式</a>
+          <span className="font-bold text-[16px] tracking-tight text-gray-900">点子</span>
         </div>
         <Link
           to="/login"
           className="px-5 py-2 text-sm font-semibold bg-gray-900 text-white rounded-xl hover:bg-gray-700 transition-colors shadow-sm"
         >
-          登录
+          开始使用
         </Link>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative flex flex-col items-center justify-center py-24 px-6 text-center overflow-hidden">
-        {/* Subtle background decoration */}
+      {/* Hero + 四大核心能力（同背景） */}
+      <section className="relative py-16 md:py-20 px-6 overflow-hidden">
+        {/* 与标题页同一背景 */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] rounded-full bg-gradient-to-b from-violet-50 to-transparent opacity-70" />
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[120%] rounded-full bg-gradient-to-b from-violet-50 to-transparent opacity-70" />
         </div>
 
-        <div className="relative z-10 flex flex-col items-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-violet-50 border border-violet-100 text-violet-600 text-xs font-semibold mb-8">
-            <Sparkles className="w-3.5 h-3.5" />
-            集成 Gemini 3.0 · 全新升级
+        <div className="relative z-10 max-w-6xl mx-auto">
+          {/* 标题区 */}
+          <div className="flex flex-col items-center text-center mb-12 md:mb-16">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-tight">
+              <span className="text-gray-900">AI 帮你理解视频，</span>
+              <span className="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent animate-glow inline-block">
+                事半功倍。
+              </span>
+            </h1>
+            <p className="max-w-2xl text-lg text-gray-500 leading-relaxed">
+              AI 自动解析视频内容与结构，生成分类、分段与精彩片段；支持关键词与深度检索快速定位素材，
+              再结合创作助手生成标题、文案与剪辑方案，让理解与创作都事半功倍。
+            </p>
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 leading-[1.1]">
-            <span className="text-gray-900">智能剪辑，</span>
-            <br />
-            <span className="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">
-              事半功倍。
-            </span>
-          </h1>
-
-          <p className="max-w-xl text-lg text-gray-500 mb-10 leading-relaxed">
-            全能 AI 视频管理平台。自动分类、时序动作分析、精彩片段检测，
-            配合 AI 创作助手，让每一次剪辑都充满灵感。
-          </p>
-
-          <div className="flex items-center gap-3 flex-wrap justify-center">
-            <Link
-              to="/login"
-              className="group flex items-center gap-2 px-7 py-3.5 bg-gray-900 hover:bg-gray-700 text-white rounded-xl font-semibold text-sm transition-all shadow-md hover:shadow-lg"
-            >
-              免费开始使用
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-            </Link>
-            <a
-              href="#features"
-              className="flex items-center gap-2 px-7 py-3.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded-xl font-semibold text-sm text-gray-600 hover:text-gray-900 transition-all"
-            >
-              <Play className="w-4 h-4" />
-              了解更多
-            </a>
-          </div>
-
-          {/* Demo credentials hint */}
-          <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-            演示账号：admin / admin123
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="relative z-10 flex items-center gap-12 mt-20 pt-12 border-t border-gray-100 w-full max-w-xl justify-center">
-          {[
-            { value: '10x', label: '剪辑效率提升' },
-            { value: '98%', label: '分析准确率' },
-            { value: '秒级', label: '智能响应速度' },
-          ].map(({ value, label }) => (
-            <div key={label} className="text-center">
-              <div className="text-3xl font-extrabold text-gray-900">{value}</div>
-              <div className="text-xs text-gray-400 mt-1 font-medium">{label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="py-24 px-6 bg-gray-50">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-14">
-            <h2 className="text-3xl font-extrabold text-gray-900 mb-3">三大核心能力</h2>
+          {/* 四大核心能力 */}
+          <div id="features" className="text-center mb-10">
+            <h2 className="text-3xl font-extrabold text-gray-900 mb-3">四大核心能力</h2>
             <p className="text-gray-500">AI 驱动的全链路视频创作管理</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <FeatureCard
               icon={<Brain className="w-5 h-5 text-violet-600" />}
               iconBg="bg-violet-50"
               title="智能视频分类"
               description="AI 自动识别视频内容，精准生成分类标签。支持旅行、Vlog、科技、美食等多种品类，轻松管理海量视频资产。"
-              tags={['自动标签', '语义检索', '多维分类']}
+              tags={['自动标签', '多维分类']}
             />
             <FeatureCard
               icon={<Search className="w-5 h-5 text-blue-600" />}
@@ -113,6 +64,13 @@ export default function LandingPage() {
               description="基于帧级分析技术，精准识别场景转换、动作片段和精彩高潮，时间轴可视化展示，一目了然。"
               tags={['精彩片段', '场景分割', '高潮检测']}
               highlight
+            />
+            <FeatureCard
+              icon={<SearchCheck className="w-5 h-5 text-amber-600" />}
+              iconBg="bg-amber-50"
+              title="深度检索"
+              description="关键词模糊检索基础上，支持在摘要、精彩片段描述、分段说明、剪辑建议与推荐标题中一并搜索，按内容语义快速定位视频。"
+              tags={['关键词检索', '语义搜索', '分析结果检索']}
             />
             <FeatureCard
               icon={<Sparkles className="w-5 h-5 text-fuchsia-600" />}
@@ -125,65 +83,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* How it works */}
-      <section id="how" className="py-24 px-6 bg-white">
-        <div className="max-w-3xl mx-auto">
-          <div className="text-center mb-14">
-            <h2 className="text-3xl font-extrabold text-gray-900 mb-3">三步开始创作</h2>
-            <p className="text-gray-500">从上传到发布，全程 AI 加速</p>
-          </div>
-
-          <div className="space-y-4">
-            {[
-              { step: '01', icon: <Video className="w-5 h-5 text-violet-600" />, title: '上传视频', desc: '支持 MP4、MOV、AVI 等主流格式，本地批量上传，AI 智能自动命名分类' },
-              { step: '02', icon: <Zap className="w-5 h-5 text-amber-500" />, title: 'AI 智能分析', desc: '一键触发 AI 分析，自动完成场景识别、动作检测、精彩片段标注，全程无需干预' },
-              { step: '03', icon: <Sparkles className="w-5 h-5 text-violet-600" />, title: '创作与发布', desc: '基于分析结果，AI 助手提供个性化标题、文案、剪辑方案，创作效率提升 10 倍' },
-            ].map(({ step, icon, title, desc }) => (
-              <div key={step} className="flex gap-5 p-6 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex-shrink-0 w-11 h-11 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center">
-                  {icon}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2.5 mb-1.5">
-                    <span className="text-[11px] font-bold text-violet-500 tracking-widest uppercase">{step}</span>
-                    <h3 className="font-bold text-gray-900">{title}</h3>
-                  </div>
-                  <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-24 px-6 bg-gray-50 text-center">
-        <div className="max-w-xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-600 text-xs font-semibold mb-8">
-            <Shield className="w-3.5 h-3.5" />
-            数据安全 · 隐私保护
-          </div>
-          <h2 className="text-4xl font-extrabold text-gray-900 mb-5">
-            开启您的
-            <span className="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent"> 智能创作 </span>
-            之旅
-          </h2>
-          <p className="text-gray-500 mb-10 leading-relaxed">
-            立即登录，免费体验完整功能。无需信用卡，无需复杂配置。
-          </p>
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-2 px-8 py-4 bg-gray-900 hover:bg-gray-700 text-white rounded-xl font-semibold transition-all shadow-md hover:shadow-lg"
-          >
-            立即免费开始
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-          <div className="mt-5 text-xs text-gray-400">
-            演示账号：admin / admin123 &nbsp;·&nbsp; demo / demo123
-          </div>
-        </div>
-      </section>
-
       {/* Footer */}
       <footer className="py-8 px-6 border-t border-gray-100 bg-white">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
@@ -191,11 +90,11 @@ export default function LandingPage() {
             <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center">
               <Video className="w-3 h-3 text-white" />
             </div>
-            <span className="text-sm font-bold text-gray-900">VAgent</span>
+            <span className="text-sm font-bold text-gray-900">点子</span>
           </div>
           <p className="text-xs text-gray-400 flex items-center gap-1.5">
             <Clock className="w-3 h-3" />
-            © 2024 VAgent · AI 智能视频剪辑平台
+            © 2026 点子 · AI 智能视频剪辑平台
           </p>
         </div>
       </footer>

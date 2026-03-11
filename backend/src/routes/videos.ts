@@ -2,7 +2,27 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { v4 as uuidv4 } from 'uuid';
+
+const execFileAsync = promisify(execFile);
+
+/** 解析 ffmpeg 可执行路径（后端进程 PATH 可能不含 Homebrew） */
+function getFfmpegPath(): string {
+  const candidates = [
+    '/opt/homebrew/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
+    'ffmpeg',
+  ];
+  for (const p of candidates) {
+    if (p === 'ffmpeg') return p;
+    if (fs.existsSync(p)) return p;
+  }
+  return 'ffmpeg';
+}
+
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import {
   getVideosByUserId,
@@ -153,6 +173,78 @@ const THUMB_COLORS = ['#16a34a', '#7c3aed', '#0284c7', '#ea580c', '#db2777', '#d
 const progressMap = new Map<string, { stage: string; detail: string }>();
 
 router.use(authMiddleware);
+
+// ── 精准定位前用 FFmpeg 转为标准 MP4（单视频流 H.264，避免云上 Decord 报错）────
+async function convertToStandardMp4(inputPath: string, outputPath: string, timeoutMs = 120000): Promise<void> {
+  await execFileAsync(
+    'ffmpeg',
+    [
+      '-i', inputPath,
+      '-c:v', 'libx264',
+      '-movflags', '+faststart',
+      '-an',
+      '-y',
+      outputPath,
+    ],
+    { timeout: timeoutMs }
+  );
+}
+
+// ── POST /videos/analyze-local/:id（精准定位，必须放在 /:id 之前）────────────
+router.post('/analyze-local/:id', async (req: AuthRequest, res: Response) => {
+  const id = req.params.id;
+  const video = getVideoById(id);
+  if (!video || video.userId !== req.userId) {
+    res.status(404).json({ message: '视频不存在' });
+    return;
+  }
+  const confidence = req.body?.confidence != null ? Number(req.body.confidence) : undefined;
+  const filePath = video.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    res.status(400).json({ message: '该视频无本地文件，无法进行精准定位' });
+    return;
+  }
+  const baseUrl = (process.env.LOCAL_MODEL_URL || 'http://221.194.152.43:8000').replace(/\/$/, '');
+  const tempPath = path.join(os.tmpdir(), `precise-${id}-${Date.now()}.mp4`);
+  let usePath = filePath;
+  try {
+    try {
+      await convertToStandardMp4(filePath, tempPath);
+      usePath = tempPath;
+    } catch (convertErr: unknown) {
+      const msg = convertErr instanceof Error ? convertErr.message : String(convertErr);
+      console.error('[analyze-local] 本机转换失败:', msg);
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+      res.status(503).json({
+        message: '本机转换视频失败，请先安装 ffmpeg 后重试：brew install ffmpeg',
+      });
+      return;
+    }
+    const buf = fs.readFileSync(usePath);
+    const blob = new Blob([buf], { type: 'video/mp4' });
+    const form = new FormData();
+    const fileName = (video.name && /\.mp4$/i.test(video.name)) ? video.name : 'video.mp4';
+    form.append('video', blob, fileName);
+    if (confidence != null && !Number.isNaN(confidence)) form.append('confidence', String(confidence));
+    const predictRes = await fetch(`${baseUrl}/predict`, { method: 'POST', body: form });
+    if (!predictRes.ok) {
+      const text = await predictRes.text();
+      res.status(502).json({ message: `精准定位服务异常: ${predictRes.status} ${text.slice(0, 200)}` });
+      return;
+    }
+    const json = await predictRes.json();
+    const updated = updateVideo(id, { localDetections: json });
+    res.json(updated);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[analyze-local]', msg);
+    res.status(502).json({ message: `调用精准定位服务失败: ${msg}` });
+  } finally {
+    if (usePath === tempPath && fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+    }
+  }
+});
 
 // ── GET /videos ──────────────────────────────────────────────
 router.get('/', (req: AuthRequest, res: Response) => {

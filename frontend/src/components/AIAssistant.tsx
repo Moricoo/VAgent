@@ -42,7 +42,7 @@ const SETTINGS_STORAGE_KEY = 'vagent_chat_settings';
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: `👋 你好！我是 **VAgent AI 创作助手**，由多个专职 Agent 协同工作。
+  content: `👋 你好！我是 **点子 AI 创作助手**，由多个专职 Agent 协同工作。
 
 你可以直接和我对话，或选择左侧视频让我基于分析结果提供帮助：
 • 📌 写标题 · 写文案 · 推荐话题标签

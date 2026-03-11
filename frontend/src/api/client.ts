@@ -53,6 +53,9 @@ export const videosApi = {
       headers: { 'Content-Type': 'application/json' },
     }),
   delete: (id: string) => api.delete(`/videos/${id}`),
+  /** 精准定位：调用云上 /predict，返回更新后的视频（含 localDetections） */
+  analyzeLocal: (id: string, confidence?: number) =>
+    api.post(`/videos/analyze-local/${id}`, confidence != null ? { confidence } : {}),
   /** Subscribe to SSE progress for a single video analysis */
   subscribeProgress: (
     videoId: string,
